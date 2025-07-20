@@ -3,7 +3,6 @@
 Test script to run the RSI pipeline and check if it works.
 """
 
-import asyncio
 import os
 from dotenv import load_dotenv
 from pipelines.rsi_pipeline import rsi_analysis_pipeline

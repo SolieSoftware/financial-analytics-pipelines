@@ -9,30 +9,11 @@ import os
 from config.schemas.supabase_schemas import RSIAnalysisResult
 
 from prefect import flow, task, get_run_logger
-from prefect.context import get_run_context
-from prefect.blocks.system import Secret
-from pydantic import BaseModel
-import yfinance as yf
-from supabase import create_client, Client
 from utils.supabase_manager import SupabaseManager
-import asyncio
-
-
 from financial_models.rsi.model import RSIModel
 
-
-@task(name="Initialize Supabase")
-def setup_supabase_connection() -> SupabaseManager:
-    logger = get_run_logger()
-    try:
-        manager = SupabaseManager(
-            supabase_url=os.getenv("SUPABASE_URL"),
-            supabase_key=os.getenv("SUPABASE_KEY"),
-        )
-        logger.info("Supabase connection initialized successfully")
-    except Exception as e:
-        logger.error(f"Error initializing Supabase connection: {e}")
-    return manager
+logging.basicConfig(level=logging.INFO)
+logger1 = logging.getLogger(__name__)
 
 
 @task(name="Get Stock Symbols")
@@ -110,32 +91,34 @@ def store_rsi_results(
     try:
         rsi_calculations = []
         for symbol, rsi_data in data.items():
+            # Get the latest values from the DataFrame
+            latest_data = rsi_data.iloc[-1]
+
             rsi_calc = RSIAnalysisResult(
                 symbol=symbol,
-                date=date.today(),
-                rsi_value=rsi_data["RSI"],
+                date=datetime.now(),
+                rsi_value=float(latest_data["RSI"]),
                 rsi_period=14,
-                open=rsi_data["Open"],
-                close=rsi_data["Close"],
-                high=rsi_data["High"],
-                low=rsi_data["Low"],
-                volume=rsi_data["Volume"],
-                created_at=datetime.now(timezone.utc).isoformat(),
+                open=float(latest_data["Open"]),
+                close=float(latest_data["Close"]),
+                high=float(latest_data["High"]),
+                low=float(latest_data["Low"]),
+                volume=int(latest_data["Volume"]),
+                created_at=datetime.now(timezone.utc),
             )
             rsi_calculations.append(rsi_calc)
 
-            result = asyncio.run(
-                supabase_manager.batch_insert_rsi_calculations(rsi_calculations)
-            )
+        # Insert all RSI calculations at once
+        result = supabase_manager.batch_insert_rsi_calculations(rsi_calculations)
 
-            if result["success"]:
-                logger.info(
-                    f"Successfully stored {result['inserted_count']} RSI calculations"
-                )
-                return True
-            else:
-                logger.error(f"Failed to store RSI results: {result['error']}")
-                return False
+        if result["success"]:
+            logger.info(
+                f"Successfully stored {result['inserted_count']} RSI calculations"
+            )
+            return True
+        else:
+            logger.error(f"Failed to store RSI results: {result['error']}")
+            return False
 
     except Exception as e:
         logger.error(f"Error storing RSI results: {e}")
@@ -152,7 +135,10 @@ def rsi_analysis_pipeline(
     logger = get_run_logger()
     logger.info("Starting RSI Analysis Pipeline")
 
-    supabase_manager = setup_supabase_connection()
+    supabase_manager = SupabaseManager(
+        supabase_url=os.getenv("SUPABASE_URL"),
+        supabase_key=os.getenv("SUPABASE_API_KEY"),
+    )
 
     symbols = get_us_stock_symbols()
 
